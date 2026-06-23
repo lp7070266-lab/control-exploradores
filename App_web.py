@@ -1,27 +1,29 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 from datetime import date
 
-# 1. Configuración de la Base de Datos
+# 1. 🌐 Configuración y Conexión a la Base de Datos en la Nube (Neon)
 def conectar_db():
-    return sqlite3.connect('registro_grupo.db')
+    # Lee la llave maestra guardada de forma segura en los Secrets de Streamlit
+    return psycopg2.connect(st.secrets["db_url"])
 
+# Crear las tablas usando el formato profesional de PostgreSQL
 conn = conectar_db()
 cursor = conn.cursor()
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS muchachos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     nombre_completo TEXT NOT NULL,
     fecha_nacimiento TEXT,
     telefono TEXT,
     direccion TEXT,
-    foto BLOB
+    foto BYTEA
 )
 ''')
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS premios_ganados (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     muchacho_id INTEGER,
     anio INTEGER,
     clase TEXT CHECK(clase IN ('Navegantes', 'Pioneros', 'Seguidores', 'Exploradores')),
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS premios_ganados (
 conn.commit()
 conn.close()
 
-# 2. 🔐 SISTEMA DE SEGURIDAD POR ROLES (Inicio de Sesión)
+# 2. 🔐 SISTEMA DE SEGURIDAD POR ROLES
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 if 'rol' not in st.session_state:
@@ -62,15 +64,15 @@ if not st.session_state['autenticado']:
         if password_ingresada == PASS_ADMIN:
             st.session_state['autenticado'] = True
             st.session_state['rol'] = "Administrador"
-            st.success("¡Acceso concedido como Administrador (Coordinador)!")
+            st.success("¡Acceso concedido como Administrador!")
             st.rerun()
         elif password_ingresada == PASS_LIDER:
             st.session_state['autenticado'] = True
             st.session_state['rol'] = "Visita"
-            st.success("¡Acceso concedido como Invitado (Líderes)!")
+            st.success("¡Acceso concedido como Invitado!")
             st.rerun()
         else:
-            st.error("Contraseña incorrecta. Verifica con tu destacamento.")
+            st.error("Contraseña incorrecta.")
             
     st.stop()
 
@@ -78,13 +80,11 @@ if not st.session_state['autenticado']:
 # 3. 🚀 APLICACIÓN PRINCIPAL
 st.set_page_config(page_title="Expediente de Exploradores", layout="wide")
 
-# --- MENÚ LATERAL ---
 with st.sidebar:
     try:
         st.image("israelogo.png", use_container_width=True)
     except:
-        st.warning("🔺 Coloca una imagen llamada 'israelogo.png' en tu escritorio para ver el logo aquí.")
-    
+        pass
     st.write("---")
     st.write(f"👤 **Usuario:** {st.session_state['rol']}")
     st.write("---")
@@ -95,7 +95,6 @@ with st.sidebar:
         menu = ["🗄️ Ver Carpetas por Muchacho"]
         
     opcion = st.selectbox("Menú de Navegación:", menu)
-    
     st.write("---")
     if st.button("🔒 Cerrar Sesión"):
         st.session_state['autenticado'] = False
@@ -104,7 +103,6 @@ with st.sidebar:
 
 st.title("🗂️ Sistema de Expedientes y Carpetas Digitales")
 
-# --- OPCIÓN 1: EXPEDIENTE / CARPETAS POR MUCHACHO ---
 if opcion == "🗄️ Ver Carpetas por Muchacho":
     st.header("Historial Académico y de Premios por Integrante")
     
@@ -121,10 +119,9 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
         muchacho_sel = st.selectbox("Selecciona el expediente que deseas revisar:", list(opciones_muchachos.keys()))
         muchacho_id = opciones_muchachos[muchacho_sel]
         
-        # Obtener sus datos personales
         conn = conectar_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT fecha_nacimiento, telefono, direccion, foto FROM muchachos WHERE id = ?", (muchacho_id,))
+        cursor.execute("SELECT fecha_nacimiento, telefono, direccion, foto FROM muchachos WHERE id = %s", (muchacho_id,))
         datos_personales = cursor.fetchone()
         conn.close()
         
@@ -133,7 +130,8 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
         
         with col_foto:
             if datos_personales[3]:
-                st.image(datos_personales[3], width=140, caption="Foto de Perfil")
+                # Convertir formato de bytes de Postgres para mostrar la imagen
+                st.image(bytes(datos_personales[3]), width=140, caption="Foto de Perfil")
             else:
                 st.image("https://via.placeholder.com/150?text=Sin+Foto", width=140, caption="Sin foto cargada")
             
@@ -145,7 +143,7 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
                             foto_bytes = nueva_foto.read()
                             conn = conectar_db()
                             cursor = conn.cursor()
-                            cursor.execute("UPDATE muchachos SET foto = ? WHERE id = ?", (foto_bytes, muchacho_id))
+                            cursor.execute("UPDATE muchachos SET foto = %s WHERE id = %s", (foto_bytes, muchacho_id))
                             conn.commit()
                             conn.close()
                             st.success("¡Foto guardada!")
@@ -162,7 +160,7 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
             
         st.write("---")
         
-        # --- 📊 CONTADOR HISTÓRICO DE PREMIOS CON EMBLEMAS ---
+        # --- 📊 RESUMEN ACUMULADO ---
         st.markdown("### 📊 Resumen Acumulado de Premios e Insignias")
         
         conn = conectar_db()
@@ -170,7 +168,7 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
         cursor.execute('''
             SELECT clase, tipo_premio, COUNT(*) 
             FROM premios_ganados 
-            WHERE muchacho_id = ? 
+            WHERE muchacho_id = %s 
             GROUP BY clase, tipo_premio
         ''', (muchacho_id,))
         conteos = cursor.fetchall()
@@ -192,12 +190,10 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
         
         for c_nom, c_emoji, c_col in clases_orden:
             with c_col:
-                # 🖼️ ¡NUEVO! Intenta cargar el emblema miniatura en la columna del resumen
                 try:
                     st.image(f"{c_nom.lower()}.png", width=55)
                 except:
                     pass
-                
                 if c_nom in resumen_premios:
                     total_de_la_clase = sum(resumen_premios[c_nom].values())
                     st.markdown(f"##### {c_emoji} {c_nom} (`{total_de_la_clase}` total)")
@@ -209,24 +205,26 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
         
         st.write("---")
         
-        # --- SECTOR DE LAS CARPETAS DETALLADAS CON EMBLEMAS GRANDES ---
+        # --- SECTOR DE LAS CARPETAS DETALLADAS ---
         st.markdown("### 📁 Carpetas de Avance por Clases, Sendas y Trimestres")
-        
         tab_nav, tab_pion, tab_seg, tab_exp = st.tabs([
             "⚓ Navegantes (4-7)", "🌲 Pioneros (8-10)", "🏹 Seguidores (11-13)", "🧭 Exploradores (14-18)"
         ])
         
         conn = conectar_db()
+        cursor = conn.cursor()
         query = '''
-        SELECT anio AS 'Año', senda AS 'Senda', trimestre AS 'Trimestre', 
-               tipo_premio AS 'Tipo de Premio', nombre_premio AS 'Premio Ganado', clase
-        FROM premios_ganados WHERE muchacho_id = ? ORDER BY anio DESC
+        SELECT anio, senda, trimestre, tipo_premio, nombre_premio, clase
+        FROM premios_ganados WHERE muchacho_id = %s ORDER BY anio DESC
         '''
-        df_premios = pd.read_sql_query(query, conn, params=(muchacho_id,))
+        cursor.execute(query, (muchacho_id,))
+        datos_tabla = cursor.fetchall()
         conn.close()
         
+        # Reconstrucción manual para máxima estabilidad con Postgres
+        df_premios = pd.DataFrame(datos_tabla, columns=['Año', 'Senda', 'Trimestre', 'Tipo de Premio', 'Premio Ganado', 'clase'])
+        
         def mostrar_carpetas_completas(df_general, nombre_clase):
-            # 🖼️ ¡NUEVO! Coloca el emblema en un tamaño mediano al inicio de la carpeta abierta
             col_emb, col_espacio = st.columns([1, 6])
             with col_emb:
                 try:
@@ -262,7 +260,6 @@ if opcion == "🗄️ Ver Carpetas por Muchacho":
         with tab_seg:  mostrar_carpetas_completas(df_premios, 'Seguidores')
         with tab_exp:  mostrar_carpetas_completas(df_premios, 'Exploradores')
 
-# --- OPCIÓN 2: REGISTRAR NUEVO MUCHACHO ---
 elif opcion == "👤 Registrar Nuevo Muchacho" and st.session_state['rol'] == "Administrador":
     st.header("Formulario de Registro Personal")
     with st.form("formulario_muchacho", clear_on_submit=True):
@@ -282,13 +279,12 @@ elif opcion == "👤 Registrar Nuevo Muchacho" and st.session_state['rol'] == "A
                 cursor = conn.cursor()
                 cursor.execute('''
                 INSERT INTO muchachos (nombre_completo, fecha_nacimiento, telefono, direccion, foto)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
                 ''', (nombre, str(fecha_nac), telefono, direccion, foto_bytes))
                 conn.commit()
                 conn.close()
                 st.success(f"¡{nombre} ha sido registrado correctamente!")
 
-# --- OPCIÓN 3: SUBIR HISTORIAL / REGISTRAR PREMIO ---
 elif opcion == "🏅 Subir Historial / Registrar Premio" and st.session_state['rol'] == "Administrador":
     st.header("Registrar Premios Actuales o Historial de Años Pasados")
     
@@ -326,7 +322,7 @@ elif opcion == "🏅 Subir Historial / Registrar Premio" and st.session_state['r
                 cursor = conn.cursor()
                 cursor.execute('''
                 INSERT INTO premios_ganados (muchacho_id, anio, clase, senda, trimestre, tipo_premio, nombre_premio, fecha_logro)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ''', (opciones_muchachos[muchacho_seleccionado], anio, clase, senda, trimestre, tipo_premio, nombre_premio, str(fecha_logro)))
                 conn.commit()
                 conn.close()
