@@ -55,8 +55,8 @@ if not st.session_state['autenticado']:
     st.title("🔐 Control de Exploradores")
     st.subheader("Módulo de Autenticación")
     
-    PASS_ADMIN = "Coordinador2026"  
-    PASS_LIDER = "Lider2026"        
+    PASS_ADMIN = st.secrets["pass_admin"]  
+    PASS_LIDER = st.secrets["pass_lider"]       
     
     password_ingresada = st.text_input("Introduce tu contraseña de acceso:", type="password")
     
